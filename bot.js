@@ -30,10 +30,21 @@ const RECONNECT_INTERVAL = 5000; // 5 giây
 function connectWebSocket() {
   const ws = new WebSocket(RPC_URL);
 
+  // Thêm biến để theo dõi interval ping
+  let pingInterval;
+
   ws.on("open", () => {
     console.log("WebSocket connected to Solana");
     wsConnected = true;
     reconnectAttempts = 0;
+
+    // Thiết lập ping mỗi 30 giây
+    pingInterval = setInterval(() => {
+      if (ws.readyState === WebSocket.OPEN) {
+        ws.ping();
+        console.log("Ping sent to keep connection alive");
+      }
+    }, 30000);
 
     // Đăng ký theo dõi các ví
     ws.send(
@@ -50,6 +61,11 @@ function connectWebSocket() {
     console.log("WebSocket closed");
     wsConnected = false;
 
+    // Xóa interval ping khi đóng kết nối
+    if (pingInterval) {
+      clearInterval(pingInterval);
+    }
+
     // Thử kết nối lại nếu chưa vượt quá số lần thử
     if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
       reconnectAttempts++;
@@ -63,6 +79,11 @@ function connectWebSocket() {
         "❌ Bot mất kết nối với Solana. Vui lòng kiểm tra lại!"
       );
     }
+  });
+
+  // Thêm handler cho pong
+  ws.on("pong", () => {
+    console.log("Received pong from server");
   });
 
   // Giữ nguyên các handler khác
