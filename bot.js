@@ -9,6 +9,9 @@ dotenv.config();
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const CHAT_ID = process.env.CHAT_ID;
 let WALLET_ADDRESSES = [];
+let wsConnected = false;
+let ws;
+
 async function updateWalletAddresses() {
   const wallets = await loadWallets();
   WALLET_ADDRESSES = wallets.wallets;
@@ -34,7 +37,6 @@ const RPC_URL = "wss://api.mainnet-beta.solana.com"; // WebSocket RPC
 const bot = new Telegraf(BOT_TOKEN);
 
 // Thêm biến để theo dõi trạng thái kết nối
-let wsConnected = false;
 let reconnectAttempts = 0;
 const MAX_RECONNECT_ATTEMPTS = 5;
 const RECONNECT_INTERVAL = 5000; // 5 giây
@@ -142,7 +144,7 @@ function connectWebSocket() {
 }
 
 // Khởi tạo kết nối WebSocket
-const ws = connectWebSocket();
+ws = connectWebSocket();
 
 // Khởi chạy bot để có thể nhận lệnh từ Telegram (nếu cần)
 bot.start((ctx) => ctx.reply("Bot đang theo dõi giao dịch ví trên Solana!"));
