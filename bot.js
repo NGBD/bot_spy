@@ -9,8 +9,59 @@ const bot = new Telegraf(process.env.BOT_TOKEN);
 const CHAT_ID = process.env.CHAT_ID;
 const WALLET_ADDRESS = process.env.WALLET_ADDRESS;
 
-// Kết nối WebSocket với Solana mainnet
-const ws = new WebSocket("wss://api.mainnet-beta.solana.com");
+// Thêm biến để theo dõi trạng thái kết nối
+let wsConnected = false;
+
+// Hàm để thiết lập kết nối WebSocket
+function setupWebSocket() {
+  const ws = new WebSocket("wss://api.mainnet-beta.solana.com");
+
+  ws.on("open", () => {
+    console.log("WebSocket đã kết nối");
+    wsConnected = true;
+
+    // Subscribe để theo dõi ví
+    const subscribeMessage = {
+      jsonrpc: "2.0",
+      id: 1,
+      method: "accountSubscribe",
+      params: [
+        WALLET_ADDRESS,
+        {
+          encoding: "jsonParsed",
+          commitment: "confirmed",
+        },
+      ],
+    };
+
+    ws.send(JSON.stringify(subscribeMessage));
+  });
+
+  ws.on("close", () => {
+    console.log("WebSocket đã đóng kết nối. Đang thử kết nối lại...");
+    wsConnected = false;
+    setTimeout(setupWebSocket, 5000); // Thử kết nối lại sau 5 giây
+  });
+
+  ws.on("error", (error) => {
+    console.error("WebSocket error:", error);
+    if (wsConnected) {
+      ws.close();
+    }
+  });
+
+  // Thêm heartbeat để giữ kết nối
+  setInterval(() => {
+    if (wsConnected) {
+      ws.ping();
+    }
+  }, 30000);
+
+  return ws;
+}
+
+// Khởi tạo WebSocket với khả năng tự kết nối lại
+const ws = setupWebSocket();
 
 // Hàm format số SOL
 const formatSOL = (lamports) => {
@@ -39,27 +90,6 @@ async function getTransactionDetails(signature) {
     return null;
   }
 }
-
-// Thiết lập WebSocket subscription
-ws.on("open", () => {
-  console.log("WebSocket đã kết nối");
-
-  // Subscribe để theo dõi ví
-  const subscribeMessage = {
-    jsonrpc: "2.0",
-    id: 1,
-    method: "accountSubscribe",
-    params: [
-      WALLET_ADDRESS,
-      {
-        encoding: "jsonParsed",
-        commitment: "confirmed",
-      },
-    ],
-  };
-
-  ws.send(JSON.stringify(subscribeMessage));
-});
 
 // Xử lý tin nhắn từ WebSocket
 ws.on("message", async (data) => {
@@ -112,11 +142,6 @@ ws.on("message", async (data) => {
   }
 });
 
-// Xử lý lỗi WebSocket
-ws.on("error", (error) => {
-  console.error("WebSocket error:", error);
-});
-
 // Khởi động bot
 bot
   .launch()
@@ -135,3 +160,9 @@ bot
 // Xử lý tắt bot an toàn
 process.once("SIGINT", () => bot.stop("SIGINT"));
 process.once("SIGTERM", () => bot.stop("SIGTERM"));
+
+// Thêm vào đầu file để kiểm tra biến môi trường
+console.log("Checking environment variables:");
+console.log("BOT_TOKEN exists:", !!process.env.BOT_TOKEN);
+console.log("CHAT_ID exists:", !!process.env.CHAT_ID);
+console.log("WALLET_ADDRESS exists:", !!process.env.WALLET_ADDRESS);
