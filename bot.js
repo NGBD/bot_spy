@@ -12,6 +12,18 @@ let WALLET_ADDRESSES = [];
 async function updateWalletAddresses() {
   const wallets = await loadWallets();
   WALLET_ADDRESSES = wallets.wallets;
+
+  // Nếu WebSocket đang kết nối, đăng ký lại subscription với danh sách ví mới
+  if (wsConnected && ws.readyState === WebSocket.OPEN) {
+    ws.send(
+      JSON.stringify({
+        jsonrpc: "2.0",
+        id: 1,
+        method: "logsSubscribe",
+        params: [{ mentions: WALLET_ADDRESSES }, { commitment: "confirmed" }],
+      })
+    );
+  }
 }
 
 // Cập nhật danh sách ví khi khởi động
@@ -166,6 +178,7 @@ bot.command("add_wallet", async (ctx) => {
   if (!wallets.wallets.includes(wallet_address)) {
     wallets.wallets.push(wallet_address);
     await saveWallets(wallets);
+    await updateWalletAddresses(); // Cập nhật và đăng ký lại subscription
     ctx.reply("Đã thêm địa chỉ ví thành công! ✅");
   } else {
     ctx.reply("Địa chỉ ví này đã tồn tại! ⚠️");
@@ -185,6 +198,7 @@ bot.command("remove_wallet", async (ctx) => {
   if (index > -1) {
     wallets.wallets.splice(index, 1);
     await saveWallets(wallets);
+    await updateWalletAddresses(); // Cập nhật và đăng ký lại subscription
     ctx.reply("Đã xóa địa chỉ ví thành công! ✅");
   } else {
     ctx.reply("Không tìm thấy địa chỉ ví này! ❌");
