@@ -219,3 +219,23 @@ bot.sendMessage(
   CHAT_ID,
   `🤖 Bot đã khởi động!\n\nSử dụng các lệnh sau:\n/addwallet <địa_chỉ> - Thêm ví để theo dõi\n/removewallet <địa_chỉ> - Xóa ví khỏi theo dõi\n/listwallet - Xem danh sách ví đang theo dõi\n/checkstatus - Kiểm tra trạng thái bot`
 );
+
+// Hàm retry với backoff, thời gian chờ ban đầu là 10 giây
+async function retryWithBackoff(fn, maxRetries = 3, initialDelay = 10000) {
+  let retries = 0;
+  while (true) {
+    try {
+      return await fn();
+    } catch (error) {
+      if (retries >= maxRetries || !error.message.includes("429")) {
+        throw error;
+      }
+      retries++;
+      const waitTime = initialDelay * Math.pow(2, retries - 1);
+      console.log(
+        `Đợi ${waitTime / 1000} giây trước khi thử lại lần ${retries}...`
+      );
+      await delay(waitTime);
+    }
+  }
+}
