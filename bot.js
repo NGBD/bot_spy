@@ -39,10 +39,10 @@ const sendNotification = async (transaction) => {
   try {
     const message =
       `🔔 Phát hiện giao dịch mới!\n\n` +
-      `Ví: ${transaction.walletAddress}\n` +
-      `Signature: ${transaction.signature}\n` +
-      `Thời gian: ${new Date().toLocaleString("vi-VN")}\n` +
-      `Link ví: https://solscan.io/account/${transaction.walletAddress}`;
+      `- Ví: ${transaction.walletAddress}\n` +
+      `- Signature: ${transaction.signature}\n` +
+      `- Thời gian: ${new Date().toLocaleString("vi-VN")}\n` +
+      `- Link ví: https://solscan.io/account/${transaction.walletAddress}`;
 
     await bot.sendMessage(CHAT_ID, message, { parse_mode: "HTML" });
   } catch (error) {
