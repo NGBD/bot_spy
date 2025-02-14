@@ -39,6 +39,7 @@ const sendNotification = async (transaction) => {
   try {
     const message =
       `🔔 Phát hiện giao dịch mới!\n\n` +
+      `Ví: ${transaction.walletAddress}\n` +
       `Signature: ${transaction.signature}\n` +
       `Thời gian: ${new Date().toLocaleString("vi-VN")}\n` +
       `Link giao dịch: https://solscan.io/tx/${transaction.signature}`;
