@@ -1,168 +1,142 @@
-import { Telegraf } from "telegraf";
-import WebSocket from "ws";
+import TelegramBot from "node-telegram-bot-api";
+import { Connection, PublicKey } from "@solana/web3.js";
 import dotenv from "dotenv";
-import fetch from "node-fetch";
+import process from "process";
 
 dotenv.config();
 
-const bot = new Telegraf(process.env.BOT_TOKEN);
-const CHAT_ID = process.env.CHAT_ID;
-const WALLET_ADDRESS = process.env.WALLET_ADDRESS;
-
-// Thêm biến để theo dõi trạng thái kết nối
-let wsConnected = false;
-
-// Hàm để thiết lập kết nối WebSocket
-function setupWebSocket() {
-  const ws = new WebSocket("wss://api.mainnet-beta.solana.com");
-
-  ws.on("open", () => {
-    console.log("WebSocket đã kết nối");
-    wsConnected = true;
-
-    // Subscribe để theo dõi ví
-    const subscribeMessage = {
-      jsonrpc: "2.0",
-      id: 1,
-      method: "accountSubscribe",
-      params: [
-        WALLET_ADDRESS,
-        {
-          encoding: "jsonParsed",
-          commitment: "confirmed",
-        },
-      ],
-    };
-
-    ws.send(JSON.stringify(subscribeMessage));
-  });
-
-  ws.on("close", () => {
-    console.log("WebSocket đã đóng kết nối. Đang thử kết nối lại...");
-    wsConnected = false;
-    setTimeout(setupWebSocket, 5000); // Thử kết nối lại sau 5 giây
-  });
-
-  ws.on("error", (error) => {
-    console.error("WebSocket error:", error);
-    if (wsConnected) {
-      ws.close();
-    }
-  });
-
-  // Thêm heartbeat để giữ kết nối
-  setInterval(() => {
-    if (wsConnected) {
-      ws.ping();
-    }
-  }, 30000);
-
-  return ws;
+// Kiểm tra các biến môi trường bắt buộc
+if (
+  !process.env.BOT_TOKEN ||
+  !process.env.CHAT_ID ||
+  !process.env.WALLET_ADDRESS
+) {
+  console.error("Thiếu thông tin trong file .env! Vui lòng kiểm tra lại.");
+  process.exit(1);
 }
 
-// Khởi tạo WebSocket với khả năng tự kết nối lại
-const ws = setupWebSocket();
+// Khởi tạo bot Telegram với các tùy chọn bảo mật
+const bot = new TelegramBot(process.env.BOT_TOKEN, {
+  polling: true,
+});
+const CHAT_ID = process.env.CHAT_ID;
 
-// Hàm format số SOL
-const formatSOL = (lamports) => {
-  return (lamports / 1000000000).toFixed(4);
+// Kết nối đến mạng Solana với các tùy chọn nâng cao
+const connection = new Connection("https://api.mainnet-beta.solana.com", {
+  commitment: "confirmed",
+  wsEndpoint: "wss://api.mainnet-beta.solana.com/",
+  confirmTransactionInitialTimeout: 60000,
+});
+
+// Kiểm tra địa chỉ ví hợp lệ
+let walletAddress;
+try {
+  walletAddress = new PublicKey(process.env.WALLET_ADDRESS);
+  if (!PublicKey.isOnCurve(walletAddress.toBytes())) {
+    throw new Error("Địa chỉ ví không hợp lệ");
+  }
+} catch (error) {
+  console.error("Lỗi địa chỉ ví:", error.message);
+  process.exit(1);
+}
+
+// Hàm tạo link Solscan với kiểm tra
+const getSolscanLink = (address) => {
+  try {
+    new PublicKey(address);
+    return `https://solscan.io/account/${address}`;
+  } catch {
+    return "Địa chỉ không hợp lệ";
+  }
 };
 
-// Hàm lấy thông tin giao dịch
-async function getTransactionDetails(signature) {
+// Hàm gửi thông báo qua Telegram với xử lý lỗi
+const sendNotification = async (transaction) => {
   try {
-    const response = await fetch("https://api.mainnet-beta.solana.com", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        jsonrpc: "2.0",
-        id: 1,
-        method: "getTransaction",
-        params: [
-          signature,
-          { encoding: "json", maxSupportedTransactionVersion: 0 },
-        ],
-      }),
-    });
-    return await response.json();
+    const message =
+      `🔔 Phát hiện giao dịch mới!\n\n` +
+      `Signature: ${transaction.signature}\n` +
+      `Thời gian: ${new Date().toLocaleString("vi-VN")}\n` +
+      `Link ví: ${getSolscanLink(process.env.WALLET_ADDRESS)}\n` +
+      `Link giao dịch: https://solscan.io/tx/${transaction.signature}`;
+
+    await bot.sendMessage(CHAT_ID, message, { parse_mode: "HTML" });
   } catch (error) {
-    console.error("Lỗi khi lấy thông tin giao dịch:", error);
-    return null;
+    console.error("Lỗi khi gửi thông báo:", error.message);
   }
-}
+};
 
-// Xử lý tin nhắn từ WebSocket
-ws.on("message", async (data) => {
+// Thêm xử lý lệnh checkstatus
+bot.onText(/\/checkstatus/, async (msg) => {
   try {
-    const response = JSON.parse(data);
-    console.log("Nhận được tin nhắn WebSocket:", response);
-
-    if (response.method === "accountNotification") {
-      const newBalance = response.params.result.value.lamports;
-      console.log("Số dư mới:", formatSOL(newBalance));
-
-      // Kiểm tra signature gần nhất
-      const signatures = await fetch("https://api.mainnet-beta.solana.com", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          jsonrpc: "2.0",
-          id: 1,
-          method: "getSignaturesForAddress",
-          params: [WALLET_ADDRESS, { limit: 1 }],
-        }),
-      }).then((res) => res.json());
-
-      console.log("Signatures response:", signatures);
-
-      if (signatures.result && signatures.result[0]) {
-        const txDetails = await getTransactionDetails(
-          signatures.result[0].signature
-        );
-
-        console.log("Transaction details:", txDetails);
-
-        if (txDetails && txDetails.result) {
-          const tx = txDetails.result;
-          const message =
-            `🔔 Phát hiện giao dịch mới!\n\n` +
-            `💰 Số dư hiện tại: ${formatSOL(newBalance)} SOL\n` +
-            `🔗 Xem giao dịch: https://solscan.io/tx/${signatures.result[0].signature}\n` +
-            `📝 Trạng thái: ${tx.meta.err ? "❌ Thất bại" : "✅ Thành công"}`;
-
-          await bot.telegram
-            .sendMessage(CHAT_ID, message)
-            .then(() => console.log("Đã gửi tin nhắn thành công"))
-            .catch((error) => console.error("Lỗi khi gửi tin nhắn:", error));
-        }
-      }
+    if (msg.chat.id.toString() !== CHAT_ID) {
+      return; // Chỉ phản hồi từ chat được cấu hình
     }
+
+    const message =
+      `✅ Bot đang hoạt động\n` +
+      `Đang theo dõi ví: ${process.env.WALLET_ADDRESS}\n` +
+      `Link ví: ${getSolscanLink(process.env.WALLET_ADDRESS)}`;
+
+    await bot.sendMessage(CHAT_ID, message);
   } catch (error) {
-    console.error("Lỗi khi xử lý tin nhắn WebSocket:", error);
+    console.error("Lỗi khi kiểm tra trạng thái:", error.message);
   }
 });
 
-// Khởi động bot
-bot
-  .launch()
-  .then(() => {
-    console.log("Bot đã khởi động thành công");
-    return bot.telegram
-      .sendMessage(CHAT_ID, "🤖 Bot đã khởi động và đang hoạt động!")
-      .catch((error) => {
-        console.error("Lỗi khi gửi tin nhắn khởi động:", error);
-      });
-  })
-  .catch((error) => {
-    console.error("Lỗi khi khởi động bot:", error);
-  });
+// Hàm chính để theo dõi ví với xử lý lỗi tốt hơn
+async function monitorWallet() {
+  console.log("Bắt đầu theo dõi ví:", process.env.WALLET_ADDRESS);
 
-// Xử lý tắt bot an toàn
-process.once("SIGINT", () => bot.stop("SIGINT"));
-process.once("SIGTERM", () => bot.stop("SIGTERM"));
+  let lastSignature = null;
 
-// Thêm vào đầu file để kiểm tra biến môi trường
-console.log("Checking environment variables:");
-console.log("BOT_TOKEN exists:", !!process.env.BOT_TOKEN);
-console.log("CHAT_ID exists:", !!process.env.CHAT_ID);
-console.log("WALLET_ADDRESS exists:", !!process.env.WALLET_ADDRESS);
+  try {
+    // Lấy signature gần nhất để bắt đầu theo dõi
+    const recentSignatures = await connection.getSignaturesForAddress(
+      walletAddress,
+      { limit: 1 }
+    );
+    if (recentSignatures.length > 0) {
+      lastSignature = recentSignatures[0].signature;
+    }
+
+    // Kiểm tra giao dịch mới mỗi 15 giây
+    const interval = setInterval(async () => {
+      try {
+        const signatures = await connection.getSignaturesForAddress(
+          walletAddress,
+          { limit: 10 }
+        );
+
+        for (const sig of signatures) {
+          if (sig.signature === lastSignature) {
+            break;
+          }
+          await sendNotification(sig);
+        }
+
+        if (signatures.length > 0) {
+          lastSignature = signatures[0].signature;
+        }
+      } catch (error) {
+        console.error("Lỗi khi kiểm tra giao dịch:", error.message);
+      }
+    }, 15000);
+
+    // Xử lý tắt chương trình đúng cách
+    process.on("SIGINT", () => {
+      clearInterval(interval);
+      console.log("\nĐã dừng theo dõi ví");
+      process.exit(0);
+    });
+  } catch (error) {
+    console.error("Lỗi khi thiết lập theo dõi:", error.message);
+    process.exit(1);
+  }
+}
+
+// Khởi động bot với xử lý lỗi
+monitorWallet().catch((error) => {
+  console.error("Lỗi khởi động bot:", error.message);
+  process.exit(1);
+});
