@@ -108,7 +108,7 @@ async function startWalletMonitoring(address) {
           error.message
         );
       }
-    }, 15000);
+    }, 5000);
 
     watchedWallets.set(address, { interval, lastSignature });
   } catch (error) {
