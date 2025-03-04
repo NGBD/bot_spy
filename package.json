@@ -9,8 +9,9 @@
   },
   "dependencies": {
     "@solana/web3.js": "latest",
+    "dotenv": "latest",
     "node-telegram-bot-api": "latest",
-    "dotenv": "latest"
+    "openai": "^4.86.1"
   },
   "overrides": {
     "telegraf": {
