@@ -11,6 +11,13 @@ if (
   !process.env.CHANNEL_ID ||
   !process.env.OPENAI_API_KEY
 ) {
+  console.log(
+    "🚀 ~  env",
+    process.env.BOT_TOKEN,
+    process.env.CHAT_ID,
+    process.env.CHANNEL_ID,
+    process.env.OPENAI_API_KEY
+  );
   console.error("Thiếu thông tin trong file .env! Vui lòng kiểm tra lại.");
   process.exit(1);
 }
