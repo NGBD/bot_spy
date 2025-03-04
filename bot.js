@@ -5,7 +5,6 @@ import process from "process";
 
 dotenv.config();
 
-// Kiểm tra các biến môi trường bắt buộc
 if (
   !process.env.BOT_TOKEN ||
   !process.env.CHAT_ID ||
@@ -16,12 +15,10 @@ if (
   process.exit(1);
 }
 
-// Khởi tạo bot Telegram
 const bot = new TelegramBot(process.env.BOT_TOKEN, {
   polling: true,
 });
 
-// Khởi tạo OpenAI
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
@@ -29,7 +26,6 @@ const openai = new OpenAI({
 const CHAT_ID = process.env.CHAT_ID;
 const CHANNEL_ID = process.env.CHANNEL_ID;
 
-// Hàm dịch văn bản sang tiếng Việt sử dụng ChatGPT
 async function translateToVietnamese(text) {
   try {
     const response = await openai.chat.completions.create({
@@ -56,10 +52,8 @@ async function translateToVietnamese(text) {
   }
 }
 
-// Hàm gửi tin nhắn đã dịch
 async function sendTranslatedMessage(originalMessage) {
   try {
-    // Bỏ qua tin nhắn không có text
     if (!originalMessage.text) {
       return;
     }
@@ -76,14 +70,12 @@ async function sendTranslatedMessage(originalMessage) {
   }
 }
 
-// Lắng nghe tin nhắn mới từ channel
 bot.on("channel_post", async (msg) => {
   if (msg.chat.id.toString() === CHANNEL_ID) {
     await sendTranslatedMessage(msg);
   }
 });
 
-// Thêm xử lý lệnh checkstatus
 bot.onText(/\/checkstatus/, async (msg) => {
   try {
     if (msg.chat.id.toString() !== CHAT_ID) {
@@ -96,13 +88,11 @@ bot.onText(/\/checkstatus/, async (msg) => {
   }
 });
 
-// Xử lý tắt chương trình đúng cách
 process.on("SIGINT", () => {
   console.log("Đang dừng bot...");
   process.exit(0);
 });
 
-// Gửi thông báo khởi động
 bot.sendMessage(
   CHAT_ID,
   `🤖 Bot đã khởi động!\n\n📢 Đang theo dõi kênh: ${CHANNEL_ID}\n\nSử dụng lệnh /checkstatus để kiểm tra trạng thái bot`
