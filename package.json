@@ -11,6 +11,7 @@
     "@google/generative-ai": "^0.24.0",
     "@solana/web3.js": "latest",
     "dotenv": "latest",
+    "google-spreadsheet": "^4.1.4",
     "node-telegram-bot-api": "latest",
     "openai": "^4.86.1"
   },

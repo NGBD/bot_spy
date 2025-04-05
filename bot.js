@@ -1,11 +1,18 @@
 import TelegramBot from "node-telegram-bot-api";
 import dotenv from "dotenv";
 import { GoogleGenerativeAI } from "@google/generative-ai";
+import { GoogleSpreadsheet } from "google-spreadsheet";
+import { JWT } from "google-auth-library";
 import process from "process";
 
 dotenv.config();
 
-if (!process.env.BOT_TOKEN || !process.env.GEMINI_API_KEY) {
+if (
+  !process.env.BOT_TOKEN ||
+  !process.env.GEMINI_API_KEY ||
+  !process.env.GOOGLE_SHEETS_CREDENTIALS ||
+  !process.env.GOOGLE_SHEET_ID
+) {
   console.error("Thiếu thông tin trong file .env! Vui lòng kiểm tra lại.");
   process.exit(1);
 }
@@ -24,6 +31,19 @@ const model = genAI.getGenerativeModel({
     maxOutputTokens: 1024,
   },
 });
+
+// Khởi tạo Google Sheets
+const credentials = JSON.parse(process.env.GOOGLE_SHEETS_CREDENTIALS);
+const serviceAccountAuth = new JWT({
+  email: credentials.client_email,
+  key: credentials.private_key,
+  scopes: ["https://www.googleapis.com/auth/spreadsheets"],
+});
+
+const doc = new GoogleSpreadsheet(
+  process.env.GOOGLE_SHEET_ID,
+  serviceAccountAuth
+);
 
 // Lưu trữ thông tin người dùng
 const userData = new Map();
@@ -44,6 +64,20 @@ const ACTIVITY_LEVELS = {
   moderate: 1.55, // Vận động vừa
   active: 1.725, // Vận động nhiều
   very_active: 1.9, // Vận động rất nhiều
+};
+
+// Hằng số cho tính toán macro
+const MACRO_RATIOS = {
+  balanced: { protein: 0.3, carbs: 0.4, fat: 0.3 },
+  highProtein: { protein: 0.4, carbs: 0.3, fat: 0.3 },
+  lowCarb: { protein: 0.3, carbs: 0.2, fat: 0.5 },
+};
+
+// Calo trên gram cho mỗi macro
+const CALORIES_PER_GRAM = {
+  protein: 4,
+  carbs: 4,
+  fat: 9,
 };
 
 function calculateBMR(weight, height, age, gender) {
@@ -71,6 +105,56 @@ function calculateIdealWeight(height, gender) {
   } else {
     return 45.5 + 2.2 * ((height - 152.4) / 2.54);
   }
+}
+
+function calculateMacros(tdee, goal) {
+  let ratio;
+  switch (goal) {
+    case "giảm cân":
+      ratio = MACRO_RATIOS.highProtein;
+      break;
+    case "tăng cơ":
+      ratio = MACRO_RATIOS.highProtein;
+      break;
+    default:
+      ratio = MACRO_RATIOS.balanced;
+  }
+
+  const proteinCalories = tdee * ratio.protein;
+  const carbsCalories = tdee * ratio.carbs;
+  const fatCalories = tdee * ratio.fat;
+
+  return {
+    protein: (proteinCalories / CALORIES_PER_GRAM.protein).toFixed(1),
+    carbs: (carbsCalories / CALORIES_PER_GRAM.carbs).toFixed(1),
+    fat: (fatCalories / CALORIES_PER_GRAM.fat).toFixed(1),
+  };
+}
+
+function getVietnameseFoodExamples(macros) {
+  return {
+    protein: [
+      "Thịt heo nạc (100g): 20g protein",
+      "Thịt gà (100g): 25g protein",
+      "Cá (100g): 20g protein",
+      "Đậu phụ (100g): 8g protein",
+      "Trứng (1 quả): 6g protein",
+    ],
+    carbs: [
+      "Cơm trắng (1 bát): 45g carbs",
+      "Bánh mì (1 ổ): 30g carbs",
+      "Phở (1 tô): 50g carbs",
+      "Bún (1 tô): 40g carbs",
+      "Khoai lang (100g): 20g carbs",
+    ],
+    fat: [
+      "Dầu ăn (1 muỗng): 14g fat",
+      "Lạc (30g): 14g fat",
+      "Mè (1 muỗng): 4g fat",
+      "Thịt mỡ (100g): 20g fat",
+      "Sữa đặc (1 muỗng): 3g fat",
+    ],
+  };
 }
 
 async function collectUserInfo(chatId) {
@@ -156,6 +240,21 @@ async function handleUserInfo(chatId, text) {
         "very_active",
       ];
       data.activityLevel = activityLevels[activity - 1];
+      userState.set(chatId, "waiting_for_goal");
+      await bot.sendMessage(
+        chatId,
+        "Mục tiêu của bạn là gì?\n1. Giảm cân\n2. Tăng cơ\n3. Duy trì cân nặng\n\nVui lòng chọn số (1-3)"
+      );
+      break;
+
+    case "waiting_for_goal":
+      const goal = parseInt(text);
+      if (isNaN(goal) || goal < 1 || goal > 3) {
+        await bot.sendMessage(chatId, "Vui lòng chọn số từ 1 đến 3");
+        return;
+      }
+      const goals = ["giảm cân", "tăng cơ", "duy trì cân nặng"];
+      data.goal = goals[goal - 1];
       userState.set(chatId, "ready");
 
       // Tính toán các chỉ số
@@ -182,22 +281,36 @@ async function handleUserInfo(chatId, text) {
         2
       );
 
+      // Tính toán macro
+      const macros = calculateMacros(data.tdee, data.goal);
+      const foodExamples = getVietnameseFoodExamples(macros);
+
       const message =
         `Cảm ơn bạn đã cung cấp thông tin!\n\nCác chỉ số sức khỏe của bạn:\n\n` +
         `📊 Chỉ số cơ bản:\n` +
         `- Tuổi: ${data.age}\n` +
         `- Chiều cao: ${data.height} cm\n` +
         `- Cân nặng: ${data.weight} kg\n` +
-        `- Cân nặng lý tưởng: ${data.idealWeight} kg\n\n` +
+        `- Cân nặng lý tưởng: ${data.idealWeight} kg\n` +
+        `- Mục tiêu: ${data.goal}\n\n` +
         `📈 Chỉ số sức khỏe:\n` +
         `- BMI: ${data.bmi}\n` +
         `- Tỷ lệ mỡ cơ thể: ${data.bodyFat}%\n` +
         `- BMR (calo cơ bản): ${data.bmr} kcal/ngày\n` +
         `- TDEE (tổng năng lượng tiêu hao): ${data.tdee} kcal/ngày\n\n` +
+        `🍽️ Chế độ dinh dưỡng:\n` +
+        `- Protein: ${macros.protein}g/ngày\n` +
+        `- Carb: ${macros.carbs}g/ngày\n` +
+        `- Fat: ${macros.fat}g/ngày\n\n` +
+        `🍜 Gợi ý thực phẩm Việt Nam:\n` +
+        `Protein:\n${foodExamples.protein.join("\n")}\n\n` +
+        `Carb:\n${foodExamples.carbs.join("\n")}\n\n` +
+        `Fat:\n${foodExamples.fat.join("\n")}\n\n` +
         `💡 Lời khuyên:\n` +
-        `- Để giảm cân: Ăn ít hơn ${data.tdee} kcal/ngày\n` +
-        `- Để tăng cân: Ăn nhiều hơn ${data.tdee} kcal/ngày\n` +
-        `- Để duy trì cân nặng: Ăn khoảng ${data.tdee} kcal/ngày\n\n` +
+        `- Để ${data.goal}: Ăn khoảng ${data.tdee} kcal/ngày\n` +
+        `- Chia nhỏ bữa ăn thành 3-5 bữa/ngày\n` +
+        `- Uống đủ nước (2-3 lít/ngày)\n` +
+        `- Kết hợp tập luyện phù hợp\n\n` +
         `Bạn có câu hỏi gì về dinh dưỡng không?`;
 
       await bot.sendMessage(chatId, message);
@@ -205,9 +318,194 @@ async function handleUserInfo(chatId, text) {
   }
 }
 
+async function analyzeFoodWithAI(foodName, weight) {
+  try {
+    const prompt = `Hãy phân tích dinh dưỡng cho ${foodName} với khối lượng ${weight}g. 
+    Trả lời theo định dạng JSON với các trường sau:
+    {
+      "calo": số calo,
+      "protein": số gram protein,
+      "fat": số gram fat,
+      "carb": số gram carb
+    }
+    Chỉ trả về JSON, không có bất kỳ văn bản nào khác.`;
+
+    const result = await model.generateContent({
+      contents: [
+        {
+          parts: [{ text: prompt }],
+        },
+      ],
+    });
+
+    const response = await result.response;
+    const text = response.text();
+
+    // Cắt bỏ các ký tự không phải JSON nếu có
+    const jsonStart = text.indexOf("{");
+    const jsonEnd = text.lastIndexOf("}") + 1;
+    const jsonStr = text.slice(jsonStart, jsonEnd);
+
+    return JSON.parse(jsonStr);
+  } catch (error) {
+    console.error("Lỗi khi phân tích thực phẩm:", error);
+    return null;
+  }
+}
+
+async function logFoodToSheet(chatId, foodName, weight, analysis) {
+  try {
+    await doc.loadInfo();
+    let sheet = doc.sheetsByTitle["Food Log"];
+
+    if (!sheet) {
+      sheet = await doc.addSheet({
+        title: "Food Log",
+        headerValues: [
+          "Date",
+          "User ID",
+          "Food",
+          "Weight",
+          "Calories",
+          "Protein",
+          "Fat",
+          "Carbs",
+        ],
+      });
+    }
+
+    const now = new Date();
+    const dateStr = now.toISOString().split("T")[0];
+
+    await sheet.addRow({
+      Date: dateStr,
+      "User ID": chatId,
+      Food: foodName,
+      Weight: weight,
+      Calories: analysis.calo,
+      Protein: analysis.protein,
+      Fat: analysis.fat,
+      Carbs: analysis.carb,
+    });
+
+    return true;
+  } catch (error) {
+    console.error("Lỗi khi ghi vào Google Sheets:", error);
+    return false;
+  }
+}
+
+async function getDailySummary(chatId) {
+  try {
+    await doc.loadInfo();
+    const sheet = doc.sheetsByTitle["Food Log"];
+    if (!sheet) return null;
+
+    const now = new Date();
+    const dateStr = now.toISOString().split("T")[0];
+
+    const rows = await sheet.getRows();
+    const todayRows = rows.filter(
+      (row) => row["Date"] === dateStr && row["User ID"] === chatId.toString()
+    );
+
+    const summary = {
+      totalCalories: 0,
+      totalProtein: 0,
+      totalFat: 0,
+      totalCarbs: 0,
+      foods: [],
+    };
+
+    todayRows.forEach((row) => {
+      summary.totalCalories += parseFloat(row["Calories"]);
+      summary.totalProtein += parseFloat(row["Protein"]);
+      summary.totalFat += parseFloat(row["Fat"]);
+      summary.totalCarbs += parseFloat(row["Carbs"]);
+      summary.foods.push({
+        name: row["Food"],
+        weight: row["Weight"],
+        calories: row["Calories"],
+      });
+    });
+
+    return summary;
+  } catch (error) {
+    console.error("Lỗi khi đọc từ Google Sheets:", error);
+    return null;
+  }
+}
+
 async function handleUserQuestion(msg) {
   try {
     const chatId = msg.chat.id;
+    const question = msg.text;
+
+    // Kiểm tra nếu là lệnh LOG
+    if (question.startsWith("LOG ")) {
+      const foodMatch = question.substring(4).match(/(.+)\s+(\d+)g/);
+      if (foodMatch) {
+        const foodName = foodMatch[1].trim();
+        const weight = parseInt(foodMatch[2]);
+
+        await bot.sendMessage(chatId, "Đang phân tích và ghi log thực phẩm...");
+
+        const analysis = await analyzeFoodWithAI(foodName, weight);
+        if (analysis) {
+          const logged = await logFoodToSheet(
+            chatId,
+            foodName,
+            weight,
+            analysis
+          );
+          if (logged) {
+            const summary = await getDailySummary(chatId);
+            if (summary) {
+              const userInfo = userData.get(chatId);
+              const remainingCalories = userInfo.tdee - summary.totalCalories;
+
+              let message =
+                `✅ Đã ghi log ${foodName} ${weight}g:\n\n` +
+                `🔥 Calo: ${analysis.calo} kcal\n` +
+                `🥩 Protein: ${analysis.protein}g\n` +
+                `🥑 Fat: ${analysis.fat}g\n` +
+                `🍚 Carb: ${analysis.carb}g\n\n` +
+                `📊 Tổng kết hôm nay:\n` +
+                `- Tổng calo: ${summary.totalCalories.toFixed(1)} kcal\n` +
+                `- Còn lại: ${remainingCalories.toFixed(1)} kcal\n` +
+                `- Tổng protein: ${summary.totalProtein.toFixed(1)}g\n` +
+                `- Tổng fat: ${summary.totalFat.toFixed(1)}g\n` +
+                `- Tổng carb: ${summary.totalCarbs.toFixed(1)}g\n\n` +
+                `🍽️ Các món đã ăn:\n`;
+
+              summary.foods.forEach((food) => {
+                message += `- ${food.name} (${food.weight}g): ${food.calories} kcal\n`;
+              });
+
+              await bot.sendMessage(chatId, message);
+            }
+          } else {
+            await bot.sendMessage(
+              chatId,
+              "Xin lỗi, không thể ghi log thực phẩm. Vui lòng thử lại sau."
+            );
+          }
+          return;
+        } else {
+          await bot.sendMessage(
+            chatId,
+            "Xin lỗi, tôi không thể phân tích thực phẩm này. Bạn có thể thử lại hoặc hỏi thực phẩm khác."
+          );
+          return;
+        }
+      } else {
+        await bot.sendMessage(
+          chatId,
+          "Vui lòng nhập đúng định dạng: LOG tên_thực_phẩm số_gram"
+        );
+        return;
+      }
+    }
 
     // Kiểm tra nếu người dùng chưa cung cấp thông tin
     if (!userData.has(chatId) || userState.get(chatId) !== "ready") {
@@ -216,7 +514,34 @@ async function handleUserQuestion(msg) {
     }
 
     const userInfo = userData.get(chatId);
-    const question = msg.text;
+
+    // Kiểm tra nếu là câu hỏi về thực phẩm
+    const foodMatch = question.match(/(.+)\s+(\d+)g/);
+    if (foodMatch) {
+      const foodName = foodMatch[1].trim();
+      const weight = parseInt(foodMatch[2]);
+
+      await bot.sendMessage(chatId, "Đang phân tích thực phẩm...");
+
+      const analysis = await analyzeFoodWithAI(foodName, weight);
+      if (analysis) {
+        const message =
+          `Thông tin dinh dưỡng cho ${foodName} ${weight}g:\n\n` +
+          `🔥 Calo: ${analysis.calo} kcal\n` +
+          `🥩 Protein: ${analysis.protein}g\n` +
+          `🥑 Fat: ${analysis.fat}g\n` +
+          `🍚 Carb: ${analysis.carb}g`;
+
+        await bot.sendMessage(chatId, message);
+        return;
+      } else {
+        await bot.sendMessage(
+          chatId,
+          "Xin lỗi, tôi không thể phân tích thực phẩm này. Bạn có thể thử lại hoặc hỏi thực phẩm khác."
+        );
+        return;
+      }
+    }
 
     const context = `Thông tin người dùng:
 - Giới tính: ${userInfo.gender}
