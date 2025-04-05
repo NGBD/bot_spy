@@ -15,12 +15,41 @@ const bot = new TelegramBot(process.env.BOT_TOKEN, {
 });
 
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
-const model = genAI.getGenerativeModel({ model: "gemini-pro" });
+const model = genAI.getGenerativeModel({
+  model: "gemini-1.0-pro",
+  generationConfig: {
+    temperature: 0.7,
+    topK: 40,
+    topP: 0.95,
+    maxOutputTokens: 1024,
+  },
+});
 
 async function handleUserQuestion(msg) {
   try {
     const question = msg.text;
-    const result = await model.generateContent(question);
+    const chat = model.startChat({
+      history: [
+        {
+          role: "user",
+          parts: [
+            {
+              text: "Bạn là một trợ lý AI hữu ích. Hãy trả lời câu hỏi một cách ngắn gọn và chính xác.",
+            },
+          ],
+        },
+        {
+          role: "model",
+          parts: [
+            {
+              text: "Tôi hiểu rồi. Tôi sẽ trả lời các câu hỏi một cách ngắn gọn và chính xác.",
+            },
+          ],
+        },
+      ],
+    });
+
+    const result = await chat.sendMessage(question);
     const response = await result.response;
     const answer = response.text();
 
