@@ -25,13 +25,19 @@ const model = genAI.getGenerativeModel({
   },
 });
 
+const SYSTEM_PROMPT = `Bạn là một chuyên gia dinh dưỡng có nhiều năm kinh nghiệm. 
+Hãy trả lời các câu hỏi về dinh dưỡng, sức khỏe và chế độ ăn uống một cách chuyên nghiệp và khoa học.
+Luôn đưa ra lời khuyên dựa trên các nghiên cứu khoa học và hướng dẫn dinh dưỡng chính thống.
+Nếu không chắc chắn về thông tin, hãy nói rõ điều đó và khuyến nghị người dùng tham khảo ý kiến chuyên gia y tế.
+Hãy trả lời bằng tiếng Việt và sử dụng ngôn ngữ dễ hiểu, gần gũi.`;
+
 async function handleUserQuestion(msg) {
   try {
     const question = msg.text;
     const result = await model.generateContent({
       contents: [
         {
-          parts: [{ text: question }],
+          parts: [{ text: SYSTEM_PROMPT }, { text: `Câu hỏi: ${question}` }],
         },
       ],
     });
