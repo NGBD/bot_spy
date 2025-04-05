@@ -157,7 +157,124 @@ function getVietnameseFoodExamples(macros) {
   };
 }
 
+// Hàm lưu thông tin người dùng vào Google Sheets
+async function saveUserInfoToSheet(chatId, userInfo) {
+  try {
+    await doc.loadInfo();
+    let sheet = doc.sheetsByTitle["User Info"];
+
+    if (!sheet) {
+      sheet = await doc.addSheet({
+        title: "User Info",
+        headerValues: [
+          "User ID",
+          "Gender",
+          "Age",
+          "Height",
+          "Weight",
+          "Activity Level",
+          "Goal",
+          "BMI",
+          "BMR",
+          "TDEE",
+          "Body Fat",
+          "Ideal Weight",
+          "Last Updated",
+        ],
+      });
+    }
+
+    const rows = await sheet.getRows();
+    const existingRow = rows.find(
+      (row) => row["User ID"] === chatId.toString()
+    );
+
+    if (existingRow) {
+      // Cập nhật thông tin người dùng hiện có
+      existingRow["Gender"] = userInfo.gender;
+      existingRow["Age"] = userInfo.age;
+      existingRow["Height"] = userInfo.height;
+      existingRow["Weight"] = userInfo.weight;
+      existingRow["Activity Level"] = userInfo.activityLevel;
+      existingRow["Goal"] = userInfo.goal;
+      existingRow["BMI"] = userInfo.bmi;
+      existingRow["BMR"] = userInfo.bmr;
+      existingRow["TDEE"] = userInfo.tdee;
+      existingRow["Body Fat"] = userInfo.bodyFat;
+      existingRow["Ideal Weight"] = userInfo.idealWeight;
+      existingRow["Last Updated"] = new Date().toISOString();
+      await existingRow.save();
+    } else {
+      // Thêm thông tin người dùng mới
+      await sheet.addRow({
+        "User ID": chatId,
+        Gender: userInfo.gender,
+        Age: userInfo.age,
+        Height: userInfo.height,
+        Weight: userInfo.weight,
+        "Activity Level": userInfo.activityLevel,
+        Goal: userInfo.goal,
+        BMI: userInfo.bmi,
+        BMR: userInfo.bmr,
+        TDEE: userInfo.tdee,
+        "Body Fat": userInfo.bodyFat,
+        "Ideal Weight": userInfo.idealWeight,
+        "Last Updated": new Date().toISOString(),
+      });
+    }
+
+    return true;
+  } catch (error) {
+    console.error("Lỗi khi lưu thông tin người dùng:", error);
+    return false;
+  }
+}
+
+// Hàm đọc thông tin người dùng từ Google Sheets
+async function loadUserInfoFromSheet(chatId) {
+  try {
+    await doc.loadInfo();
+    const sheet = doc.sheetsByTitle["User Info"];
+    if (!sheet) return null;
+
+    const rows = await sheet.getRows();
+    const userRow = rows.find((row) => row["User ID"] === chatId.toString());
+
+    if (!userRow) return null;
+
+    return {
+      gender: userRow["Gender"],
+      age: parseInt(userRow["Age"]),
+      height: parseInt(userRow["Height"]),
+      weight: parseFloat(userRow["Weight"]),
+      activityLevel: userRow["Activity Level"],
+      goal: userRow["Goal"],
+      bmi: parseFloat(userRow["BMI"]),
+      bmr: parseFloat(userRow["BMR"]),
+      tdee: parseFloat(userRow["TDEE"]),
+      bodyFat: parseFloat(userRow["Body Fat"]),
+      idealWeight: parseFloat(userRow["Ideal Weight"]),
+    };
+  } catch (error) {
+    console.error("Lỗi khi đọc thông tin người dùng:", error);
+    return null;
+  }
+}
+
+// Cập nhật hàm collectUserInfo
 async function collectUserInfo(chatId) {
+  // Kiểm tra xem đã có thông tin trong Google Sheets chưa
+  const savedUserInfo = await loadUserInfoFromSheet(chatId);
+  if (savedUserInfo) {
+    userData.set(chatId, savedUserInfo);
+    userState.set(chatId, "ready");
+    await bot.sendMessage(
+      chatId,
+      "Tôi đã tìm thấy thông tin của bạn trong hệ thống. Bạn có thể bắt đầu sử dụng các tính năng của bot."
+    );
+    return;
+  }
+
   if (!userData.has(chatId)) {
     userData.set(chatId, {});
     userState.set(chatId, "waiting_for_gender");
@@ -280,6 +397,9 @@ async function handleUserInfo(chatId, text) {
       data.idealWeight = calculateIdealWeight(data.height, data.gender).toFixed(
         2
       );
+
+      // Lưu thông tin người dùng vào Google Sheets
+      await saveUserInfoToSheet(chatId, data);
 
       // Tính toán macro
       const macros = calculateMacros(data.tdee, data.goal);
