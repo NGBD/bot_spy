@@ -634,6 +634,57 @@ async function handleUserQuestion(msg) {
     }
 
     const userInfo = userData.get(chatId);
+    const summary = await getDailySummary(chatId);
+
+    // Xử lý các câu hỏi về dinh dưỡng hôm nay
+    if (
+      question.toLowerCase().includes("hôm nay") ||
+      question.toLowerCase().includes("đã ăn") ||
+      question.toLowerCase().includes("calo")
+    ) {
+      if (!summary) {
+        await bot.sendMessage(
+          chatId,
+          "Hôm nay bạn chưa ghi log bất kỳ món ăn nào."
+        );
+        return;
+      }
+
+      const remainingCalories = userInfo.tdee - summary.totalCalories;
+      const macros = calculateMacros(userInfo.tdee, userInfo.goal);
+      const remainingMacros = {
+        protein: macros.protein - summary.totalProtein,
+        carbs: macros.carbs - summary.totalCarbs,
+        fat: macros.fat - summary.totalFat,
+      };
+
+      let message =
+        `📊 Tổng kết dinh dưỡng hôm nay:\n\n` +
+        `🔥 Calo:\n` +
+        `- Đã ăn: ${summary.totalCalories.toFixed(1)} kcal\n` +
+        `- Còn lại: ${remainingCalories.toFixed(1)} kcal\n` +
+        `- Mục tiêu: ${userInfo.tdee} kcal\n\n` +
+        `🥩 Protein:\n` +
+        `- Đã ăn: ${summary.totalProtein.toFixed(1)}g\n` +
+        `- Còn lại: ${remainingMacros.protein.toFixed(1)}g\n` +
+        `- Mục tiêu: ${macros.protein}g\n\n` +
+        `🍚 Carb:\n` +
+        `- Đã ăn: ${summary.totalCarbs.toFixed(1)}g\n` +
+        `- Còn lại: ${remainingMacros.carbs.toFixed(1)}g\n` +
+        `- Mục tiêu: ${macros.carbs}g\n\n` +
+        `🥑 Fat:\n` +
+        `- Đã ăn: ${summary.totalFat.toFixed(1)}g\n` +
+        `- Còn lại: ${remainingMacros.fat.toFixed(1)}g\n` +
+        `- Mục tiêu: ${macros.fat}g\n\n` +
+        `🍽️ Các món đã ăn hôm nay:\n`;
+
+      summary.foods.forEach((food) => {
+        message += `- ${food.name} (${food.weight}g): ${food.calories} kcal\n`;
+      });
+
+      await bot.sendMessage(chatId, message);
+      return;
+    }
 
     // Kiểm tra nếu là câu hỏi về thực phẩm
     const foodMatch = question.match(/(.+)\s+(\d+)g/);
@@ -674,6 +725,17 @@ async function handleUserQuestion(msg) {
 - Tỷ lệ mỡ cơ thể: ${userInfo.bodyFat}%
 - Cân nặng lý tưởng: ${userInfo.idealWeight} kg
 - Mức độ vận động: ${userInfo.activityLevel}
+- Mục tiêu: ${userInfo.goal}
+
+${
+  summary
+    ? `Dinh dưỡng hôm nay:
+- Tổng calo: ${summary.totalCalories.toFixed(1)} kcal
+- Tổng protein: ${summary.totalProtein.toFixed(1)}g
+- Tổng carb: ${summary.totalCarbs.toFixed(1)}g
+- Tổng fat: ${summary.totalFat.toFixed(1)}g`
+    : "Chưa có dữ liệu về bữa ăn hôm nay"
+}
 
 Câu hỏi: ${question}`;
 
