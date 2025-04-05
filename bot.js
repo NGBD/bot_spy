@@ -263,24 +263,33 @@ async function loadUserInfoFromSheet(chatId) {
 
 // Cập nhật hàm collectUserInfo
 async function collectUserInfo(chatId) {
-  // Kiểm tra xem đã có thông tin trong Google Sheets chưa
-  const savedUserInfo = await loadUserInfoFromSheet(chatId);
-  if (savedUserInfo) {
-    userData.set(chatId, savedUserInfo);
-    userState.set(chatId, "ready");
-    await bot.sendMessage(
-      chatId,
-      "Tôi đã tìm thấy thông tin của bạn trong hệ thống. Bạn có thể bắt đầu sử dụng các tính năng của bot."
-    );
-    return;
-  }
+  try {
+    // Luôn kiểm tra thông tin từ Google Sheets trước
+    const savedUserInfo = await loadUserInfoFromSheet(chatId);
+    if (savedUserInfo) {
+      userData.set(chatId, savedUserInfo);
+      userState.set(chatId, "ready");
+      await bot.sendMessage(
+        chatId,
+        "Tôi đã tìm thấy thông tin của bạn trong hệ thống. Bạn có thể bắt đầu sử dụng các tính năng của bot."
+      );
+      return;
+    }
 
-  if (!userData.has(chatId)) {
-    userData.set(chatId, {});
-    userState.set(chatId, "waiting_for_gender");
+    // Nếu không tìm thấy thông tin trong Google Sheets, mới bắt đầu thu thập
+    if (!userData.has(chatId)) {
+      userData.set(chatId, {});
+      userState.set(chatId, "waiting_for_gender");
+      await bot.sendMessage(
+        chatId,
+        "Xin chào! Để tôi có thể tính toán các chỉ số sức khỏe chính xác cho bạn, tôi cần một số thông tin cơ bản.\n\nBạn là nam hay nữ? (nam/nữ)"
+      );
+    }
+  } catch (error) {
+    console.error("Lỗi khi thu thập thông tin người dùng:", error);
     await bot.sendMessage(
       chatId,
-      "Xin chào! Để tôi có thể tính toán các chỉ số sức khỏe chính xác cho bạn, tôi cần một số thông tin cơ bản.\n\nBạn là nam hay nữ? (nam/nữ)"
+      "Xin lỗi, có lỗi xảy ra khi kiểm tra thông tin của bạn. Vui lòng thử lại sau."
     );
   }
 }
@@ -561,6 +570,16 @@ async function handleUserQuestion(msg) {
     const chatId = msg.chat.id;
     const question = msg.text;
 
+    // Kiểm tra thông tin người dùng từ Google Sheets trước
+    const savedUserInfo = await loadUserInfoFromSheet(chatId);
+    if (savedUserInfo) {
+      userData.set(chatId, savedUserInfo);
+      userState.set(chatId, "ready");
+    } else if (!userData.has(chatId) || userState.get(chatId) !== "ready") {
+      await collectUserInfo(chatId);
+      return;
+    }
+
     // Kiểm tra nếu là lệnh LOG
     if (question.startsWith("LOG ")) {
       const foodMatch = question.substring(4).match(/(.+)\s+(\d+)g/);
@@ -625,12 +644,6 @@ async function handleUserQuestion(msg) {
         );
         return;
       }
-    }
-
-    // Kiểm tra nếu người dùng chưa cung cấp thông tin
-    if (!userData.has(chatId) || userState.get(chatId) !== "ready") {
-      await collectUserInfo(chatId);
-      return;
     }
 
     const userInfo = userData.get(chatId);
