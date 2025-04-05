@@ -161,9 +161,12 @@ function getVietnameseFoodExamples(macros) {
 async function saveUserInfoToSheet(chatId, userInfo) {
   try {
     await doc.loadInfo();
-    let sheet = doc.sheetsByTitle["User Info"];
+    console.log("Đang tìm sheet User Info...");
 
+    // Tìm sheet User Info
+    let sheet = doc.sheetsByTitle["User Info"];
     if (!sheet) {
+      console.log("Không tìm thấy sheet User Info, đang tạo mới...");
       sheet = await doc.addSheet({
         title: "User Info",
         headerValues: [
@@ -184,12 +187,19 @@ async function saveUserInfoToSheet(chatId, userInfo) {
       });
     }
 
+    console.log("Đang đọc dữ liệu từ sheet...");
     const rows = await sheet.getRows();
-    const existingRow = rows.find(
-      (row) => row["User ID"] === chatId.toString()
-    );
+    console.log(`Tìm thấy ${rows.length} dòng trong sheet User Info`);
+
+    const existingRow = rows.find((row) => {
+      const rowUserId = row["User ID"]?.toString();
+      const chatIdStr = chatId.toString();
+      console.log(`So sánh User ID: ${rowUserId} với ${chatIdStr}`);
+      return rowUserId === chatIdStr;
+    });
 
     if (existingRow) {
+      console.log("Đang cập nhật thông tin người dùng hiện có...");
       // Cập nhật thông tin người dùng hiện có
       existingRow["Gender"] = userInfo.gender;
       existingRow["Age"] = userInfo.age;
@@ -204,7 +214,9 @@ async function saveUserInfoToSheet(chatId, userInfo) {
       existingRow["Ideal Weight"] = userInfo.idealWeight;
       existingRow["Last Updated"] = new Date().toISOString();
       await existingRow.save();
+      console.log("Đã cập nhật thông tin người dùng");
     } else {
+      console.log("Đang thêm thông tin người dùng mới...");
       // Thêm thông tin người dùng mới
       await sheet.addRow({
         "User ID": chatId,
@@ -221,6 +233,7 @@ async function saveUserInfoToSheet(chatId, userInfo) {
         "Ideal Weight": userInfo.idealWeight,
         "Last Updated": new Date().toISOString(),
       });
+      console.log("Đã thêm thông tin người dùng mới");
     }
 
     return true;
@@ -234,27 +247,60 @@ async function saveUserInfoToSheet(chatId, userInfo) {
 async function loadUserInfoFromSheet(chatId) {
   try {
     await doc.loadInfo();
+    console.log("Đang tìm sheet User Info...");
+
     const sheet = doc.sheetsByTitle["User Info"];
-    if (!sheet) return null;
+    if (!sheet) {
+      console.log("Không tìm thấy sheet User Info");
+      return null;
+    }
 
+    console.log("Đang đọc dữ liệu từ sheet...");
     const rows = await sheet.getRows();
-    const userRow = rows.find((row) => row["User ID"] === chatId.toString());
+    console.log(`Tìm thấy ${rows.length} dòng trong sheet User Info`);
 
-    if (!userRow) return null;
+    const userRow = rows.find((row) => {
+      const rowUserId = row["User ID"]?.toString();
+      const chatIdStr = chatId.toString();
+      console.log(`So sánh User ID: ${rowUserId} với ${chatIdStr}`);
+      return rowUserId === chatIdStr;
+    });
 
-    return {
-      gender: userRow["Gender"],
-      age: parseInt(userRow["Age"]),
-      height: parseInt(userRow["Height"]),
-      weight: parseFloat(userRow["Weight"]),
-      activityLevel: userRow["Activity Level"],
-      goal: userRow["Goal"],
-      bmi: parseFloat(userRow["BMI"]),
-      bmr: parseFloat(userRow["BMR"]),
-      tdee: parseFloat(userRow["TDEE"]),
-      bodyFat: parseFloat(userRow["Body Fat"]),
-      idealWeight: parseFloat(userRow["Ideal Weight"]),
+    if (!userRow) {
+      console.log(`Không tìm thấy thông tin cho User ID: ${chatId}`);
+      return null;
+    }
+
+    console.log("Tìm thấy thông tin người dùng:", userRow);
+
+    // Đảm bảo chuyển đổi đúng kiểu dữ liệu
+    const userInfo = {
+      gender: userRow["Gender"]?.toString() || "",
+      age: parseInt(userRow["Age"]) || 0,
+      height: parseInt(userRow["Height"]) || 0,
+      weight: parseFloat(userRow["Weight"]) || 0,
+      activityLevel: userRow["Activity Level"]?.toString() || "",
+      goal: userRow["Goal"]?.toString() || "",
+      bmi: parseFloat(userRow["BMI"]) || 0,
+      bmr: parseFloat(userRow["BMR"]) || 0,
+      tdee: parseFloat(userRow["TDEE"]) || 0,
+      bodyFat: parseFloat(userRow["Body Fat"]) || 0,
+      idealWeight: parseFloat(userRow["Ideal Weight"]) || 0,
     };
+
+    // Kiểm tra xem có đủ thông tin không
+    if (
+      !userInfo.gender ||
+      !userInfo.age ||
+      !userInfo.height ||
+      !userInfo.weight
+    ) {
+      console.log("Thiếu thông tin cơ bản của người dùng");
+      return null;
+    }
+
+    console.log("Thông tin người dùng đã được load:", userInfo);
+    return userInfo;
   } catch (error) {
     console.error("Lỗi khi đọc thông tin người dùng:", error);
     return null;
@@ -264,9 +310,12 @@ async function loadUserInfoFromSheet(chatId) {
 // Cập nhật hàm collectUserInfo
 async function collectUserInfo(chatId) {
   try {
+    console.log(`Bắt đầu thu thập thông tin cho User ID: ${chatId}`);
+
     // Luôn kiểm tra thông tin từ Google Sheets trước
     const savedUserInfo = await loadUserInfoFromSheet(chatId);
     if (savedUserInfo) {
+      console.log("Đã tìm thấy thông tin trong Google Sheets");
       userData.set(chatId, savedUserInfo);
       userState.set(chatId, "ready");
       await bot.sendMessage(
@@ -275,6 +324,10 @@ async function collectUserInfo(chatId) {
       );
       return;
     }
+
+    console.log(
+      "Không tìm thấy thông tin trong Google Sheets, bắt đầu thu thập mới"
+    );
 
     // Nếu không tìm thấy thông tin trong Google Sheets, mới bắt đầu thu thập
     if (!userData.has(chatId)) {
@@ -527,16 +580,32 @@ async function logFoodToSheet(chatId, foodName, weight, analysis) {
 async function getDailySummary(chatId) {
   try {
     await doc.loadInfo();
+    console.log("Đang tìm sheet Food Log...");
+
     const sheet = doc.sheetsByTitle["Food Log"];
-    if (!sheet) return null;
+    if (!sheet) {
+      console.log("Không tìm thấy sheet Food Log");
+      return null;
+    }
+
+    console.log("Đang đọc dữ liệu từ sheet Food Log...");
+    const rows = await sheet.getRows();
+    console.log(`Tìm thấy ${rows.length} dòng trong sheet Food Log`);
 
     const now = new Date();
     const dateStr = now.toISOString().split("T")[0];
 
-    const rows = await sheet.getRows();
-    const todayRows = rows.filter(
-      (row) => row["Date"] === dateStr && row["User ID"] === chatId.toString()
-    );
+    const todayRows = rows.filter((row) => {
+      const rowDate = row["Date"]?.toString();
+      const rowUserId = row["User ID"]?.toString();
+      const chatIdStr = chatId.toString();
+      console.log(
+        `So sánh: Date=${rowDate}, User ID=${rowUserId} với ${chatIdStr}`
+      );
+      return rowDate === dateStr && rowUserId === chatIdStr;
+    });
+
+    console.log(`Tìm thấy ${todayRows.length} bữa ăn hôm nay`);
 
     const summary = {
       totalCalories: 0,
@@ -547,20 +616,21 @@ async function getDailySummary(chatId) {
     };
 
     todayRows.forEach((row) => {
-      summary.totalCalories += parseFloat(row["Calories"]);
-      summary.totalProtein += parseFloat(row["Protein"]);
-      summary.totalFat += parseFloat(row["Fat"]);
-      summary.totalCarbs += parseFloat(row["Carbs"]);
+      summary.totalCalories += parseFloat(row["Calories"]) || 0;
+      summary.totalProtein += parseFloat(row["Protein"]) || 0;
+      summary.totalFat += parseFloat(row["Fat"]) || 0;
+      summary.totalCarbs += parseFloat(row["Carbs"]) || 0;
       summary.foods.push({
-        name: row["Food"],
-        weight: row["Weight"],
-        calories: row["Calories"],
+        name: row["Food"]?.toString() || "",
+        weight: parseFloat(row["Weight"]) || 0,
+        calories: parseFloat(row["Calories"]) || 0,
       });
     });
 
+    console.log("Tổng kết bữa ăn hôm nay:", summary);
     return summary;
   } catch (error) {
-    console.error("Lỗi khi đọc từ Google Sheets:", error);
+    console.error("Lỗi khi đọc tổng kết bữa ăn:", error);
     return null;
   }
 }
