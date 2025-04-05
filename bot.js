@@ -578,16 +578,83 @@ Câu hỏi: ${question}`;
   }
 }
 
+async function handleCheckStatus(chatId) {
+  try {
+    // Kiểm tra nếu người dùng chưa cung cấp thông tin
+    if (!userData.has(chatId) || userState.get(chatId) !== "ready") {
+      await collectUserInfo(chatId);
+      return;
+    }
+
+    const userInfo = userData.get(chatId);
+    const summary = await getDailySummary(chatId);
+
+    if (!summary) {
+      await bot.sendMessage(chatId, "Chưa có dữ liệu về bữa ăn hôm nay.");
+      return;
+    }
+
+    const remainingCalories = userInfo.tdee - summary.totalCalories;
+    const macros = calculateMacros(userInfo.tdee, userInfo.goal);
+
+    const remainingMacros = {
+      protein: macros.protein - summary.totalProtein,
+      carbs: macros.carbs - summary.totalCarbs,
+      fat: macros.fat - summary.totalFat,
+    };
+
+    const message =
+      `📊 Trạng thái dinh dưỡng hôm nay:\n\n` +
+      `🔥 Calo:\n` +
+      `- Đã ăn: ${summary.totalCalories.toFixed(1)} kcal\n` +
+      `- Còn lại: ${remainingCalories.toFixed(1)} kcal\n` +
+      `- Mục tiêu: ${userInfo.tdee} kcal\n\n` +
+      `🥩 Protein:\n` +
+      `- Đã ăn: ${summary.totalProtein.toFixed(1)}g\n` +
+      `- Còn lại: ${remainingMacros.protein.toFixed(1)}g\n` +
+      `- Mục tiêu: ${macros.protein}g\n\n` +
+      `🍚 Carb:\n` +
+      `- Đã ăn: ${summary.totalCarbs.toFixed(1)}g\n` +
+      `- Còn lại: ${remainingMacros.carbs.toFixed(1)}g\n` +
+      `- Mục tiêu: ${macros.carbs}g\n\n` +
+      `🥑 Fat:\n` +
+      `- Đã ăn: ${summary.totalFat.toFixed(1)}g\n` +
+      `- Còn lại: ${remainingMacros.fat.toFixed(1)}g\n` +
+      `- Mục tiêu: ${macros.fat}g\n\n` +
+      `🍽️ Các món đã ăn hôm nay:\n`;
+
+    summary.foods.forEach((food) => {
+      message += `- ${food.name} (${food.weight}g): ${food.calories} kcal\n`;
+    });
+
+    await bot.sendMessage(chatId, message);
+  } catch (error) {
+    console.error("Lỗi khi kiểm tra trạng thái:", error);
+    await bot.sendMessage(
+      chatId,
+      "Xin lỗi, không thể kiểm tra trạng thái ngay lúc này."
+    );
+  }
+}
+
 // Xử lý tin nhắn từ người dùng
 bot.on("message", async (msg) => {
   if (!msg.text) return;
 
   const chatId = msg.chat.id;
+  const text = msg.text;
+
+  // Xử lý lệnh /checkstatus
+  if (text === "/checkstatus") {
+    await handleCheckStatus(chatId);
+    return;
+  }
+
   const state = userState.get(chatId);
 
   // Nếu đang trong quá trình thu thập thông tin
   if (state && state !== "ready") {
-    await handleUserInfo(chatId, msg.text);
+    await handleUserInfo(chatId, text);
     return;
   }
 
