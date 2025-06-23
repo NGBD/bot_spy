@@ -58,7 +58,7 @@ function getActivityCalories(activity) {
 }
 
 // Map để lưu trạng thái nhắc nhở và calo cho mỗi người dùng
-const reminderState = new Map(); // chatId -> { enabled: boolean, lastSent: string, dailyCalories: number, activityStart: string, currentActivity: string }
+const reminderState = new Map(); // chatId -> { enabled: boolean, lastSent: string, dailyCalories: number, activityStart: string, currentActivity: string, lunchWalkStatus: string, lunchWalkStartTime: string }
 
 // Lịch trình hoạt động hàng ngày với thông tin calo
 const dailySchedule = [
@@ -97,25 +97,22 @@ const dailySchedule = [
     message:
       "🍜 Giờ ăn trưa và nghỉ ngơi. Bạn nên tranh thủ chợp mắt 20-30 phút để nạp lại năng lượng nhé.",
     activity: "eating",
-    duration: 60,
+    duration: 30,
   },
   {
-    time: "13:00",
-    message: "🏢 Bắt đầu giờ làm việc buổi chiều. Cố lên nào!",
-    activity: "sitting_work",
-    duration: 60,
+    time: "12:30",
+    message:
+      "🚶‍♂️ Bạn đã bắt đầu đi dạo sau ăn chưa? Gửi 'có' hoặc 'chưa' để tôi biết nhé!",
+    activity: "light_exercise",
+    duration: 0, // Sẽ được tính dựa trên phản hồi
+    interactive: true,
+    question: "lunch_walk_start",
   },
   {
     time: "14:00",
-    message: "🧘‍♀️ Giải lao 5 phút! Đứng dậy, đi lại, giãn cơ nhẹ nào.",
-    activity: "light_exercise",
-    duration: 5,
-  },
-  {
-    time: "14:05",
-    message: "💪 Hết giờ giải lao, quay lại làm việc thôi!",
+    message: "🏢 Bắt đầu giờ làm việc buổi chiều. Cố lên nào!",
     activity: "sitting_work",
-    duration: 55,
+    duration: 60,
   },
   {
     time: "15:00",
@@ -131,31 +128,43 @@ const dailySchedule = [
   },
   {
     time: "16:00",
+    message: "🧘‍♀️ Giải lao 5 phút! Đứng dậy, đi lại, giãn cơ nhẹ nào.",
+    activity: "light_exercise",
+    duration: 5,
+  },
+  {
+    time: "16:05",
+    message: "💪 Hết giờ giải lao, quay lại làm việc thôi!",
+    activity: "sitting_work",
+    duration: 55,
+  },
+  {
+    time: "17:00",
     message: "🏢 Sắp hết giờ làm rồi, tập trung hoàn thành nốt công việc nhé!",
     activity: "sitting_work",
     duration: 90,
   },
   {
-    time: "17:30",
+    time: "18:30",
     message: "🎉 Hết giờ làm! Về nhà thôi.",
     activity: "resting",
     duration: 90,
   },
   {
-    time: "19:00",
+    time: "20:00",
     message: "🍽️ Bữa tối vui vẻ nhé.",
     activity: "eating",
     duration: 30,
   },
   {
-    time: "20:30",
+    time: "21:30",
     message:
       "🏃‍♂️ Bắt đầu 10 phút tập thể dục tại nhà! Vận động giúp đốt mỡ và giãn cơ sau một ngày dài ngồi làm việc.",
     activity: "moderate_exercise",
     duration: 10,
   },
   {
-    time: "22:30",
+    time: "23:30",
     message:
       "🤸‍♀️ Đừng quên buổi tập thể dục cuối ngày nhé! 10 phút vận động nhẹ nhàng sẽ giúp bạn ngủ ngon hơn.",
     activity: "light_exercise",
@@ -238,6 +247,15 @@ function checkReminders() {
           state.lastSent = currentTime;
           reminderState.set(chatId, state);
 
+          // Xử lý đặc biệt cho câu hỏi đi dạo
+          if (event.interactive && event.question === "lunch_walk_start") {
+            // Đặt trạng thái chờ phản hồi
+            state.lunchWalkStatus = "waiting_response";
+            reminderState.set(chatId, state);
+            // Không tính calo ngay, chờ phản hồi từ người dùng
+            continue;
+          }
+
           // Lên lịch gửi báo cáo calo sau khi kết thúc hoạt động
           setTimeout(async () => {
             const caloriesBurned = calculateActivityCalories(
@@ -302,6 +320,132 @@ bot.on("message", async (msg) => {
   const text = msg.text;
 
   try {
+    // Xử lý phản hồi cho câu hỏi đi dạo sau ăn
+    const state = reminderState.get(chatId);
+    if (state && state.lunchWalkStatus === "waiting_response") {
+      const response = text.toLowerCase().trim();
+      if (
+        response === "có" ||
+        response === "co" ||
+        response === "yes" ||
+        response === "y"
+      ) {
+        // Người dùng đã bắt đầu đi dạo
+        state.lunchWalkStatus = "walking";
+        state.lunchWalkStartTime = new Date();
+        reminderState.set(chatId, state);
+
+        await bot.sendMessage(
+          chatId,
+          "🚶‍♂️ Tuyệt vời! Bạn đã bắt đầu đi dạo. Tôi sẽ nhắc bạn sau 20 phút."
+        );
+
+        // Lên lịch nhắc nhở sau 20 phút
+        setTimeout(async () => {
+          const walkState = reminderState.get(chatId);
+          if (walkState && walkState.lunchWalkStatus === "walking") {
+            const walkDuration = 20; // 20 phút
+            const caloriesBurned = calculateActivityCalories(
+              "light_exercise",
+              walkDuration
+            );
+            walkState.dailyCalories += caloriesBurned;
+            walkState.lunchWalkStatus = "completed";
+            reminderState.set(chatId, walkState);
+
+            await bot.sendMessage(
+              chatId,
+              `✅ Hoàn thành đi dạo sau ăn!
+            
+⏰ Thời gian đi dạo: ${walkDuration} phút
+🔥 Calo tiêu thụ: ${caloriesBurned} calo
+💡 Đi dạo sau ăn giúp tiêu hóa tốt và đốt calo hiệu quả!`
+            );
+
+            // Gửi tổng calo trong ngày
+            const dailyTotalMessage = `📈 Tổng calo tiêu thụ hôm nay: ${
+              walkState.dailyCalories
+            } calo\n\n${getDailyProgress(walkState.dailyCalories)}`;
+            await bot.sendMessage(chatId, dailyTotalMessage);
+          }
+        }, 20 * 60 * 1000); // 20 phút
+
+        return;
+      } else if (
+        response === "chưa" ||
+        response === "chua" ||
+        response === "no" ||
+        response === "n"
+      ) {
+        // Người dùng chưa đi dạo
+        state.lunchWalkStatus = "not_walking";
+        reminderState.set(chatId, state);
+
+        await bot.sendMessage(
+          chatId,
+          "😊 Không sao! Bạn có thể đi dạo bất cứ lúc nào trong thời gian nghỉ trưa. Gửi 'có' khi bạn bắt đầu đi dạo hoặc sử dụng lệnh /walk [số] phút để chỉ định thời gian!"
+        );
+        return;
+      } else if (response.match(/^\d+$/)) {
+        // Người dùng chỉ định thời gian đi dạo
+        const walkDuration = parseInt(response);
+        if (walkDuration > 0 && walkDuration <= 120) {
+          state.lunchWalkStatus = "walking";
+          state.lunchWalkStartTime = new Date();
+          reminderState.set(chatId, state);
+
+          const estimatedCalories = calculateActivityCalories(
+            "light_exercise",
+            walkDuration
+          );
+
+          await bot.sendMessage(
+            chatId,
+            `🚶‍♂️ Tuyệt vời! Bạn sẽ đi dạo ${walkDuration} phút. Tôi sẽ nhắc bạn khi hoàn thành!
+          
+⏰ Thời gian: ${walkDuration} phút
+🔥 Dự kiến calo tiêu thụ: ${estimatedCalories} calo`
+          );
+
+          // Lên lịch nhắc nhở sau thời gian chỉ định
+          setTimeout(async () => {
+            const walkState = reminderState.get(chatId);
+            if (walkState && walkState.lunchWalkStatus === "walking") {
+              const caloriesBurned = calculateActivityCalories(
+                "light_exercise",
+                walkDuration
+              );
+              walkState.dailyCalories += caloriesBurned;
+              walkState.lunchWalkStatus = "completed";
+              reminderState.set(chatId, walkState);
+
+              await bot.sendMessage(
+                chatId,
+                `✅ Hoàn thành đi dạo sau ăn!
+              
+⏰ Thời gian đi dạo: ${walkDuration} phút
+🔥 Calo tiêu thụ: ${caloriesBurned} calo
+⚡ Trung bình: ${Math.round(caloriesBurned / walkDuration)} calo/phút
+💡 Đi dạo sau ăn giúp tiêu hóa tốt và đốt calo hiệu quả!`
+              );
+
+              // Gửi tổng calo trong ngày
+              const dailyTotalMessage = `📈 Tổng calo tiêu thụ hôm nay: ${
+                walkState.dailyCalories
+              } calo\n\n${getDailyProgress(walkState.dailyCalories)}`;
+              await bot.sendMessage(chatId, dailyTotalMessage);
+            }
+          }, walkDuration * 60 * 1000); // Chuyển phút thành milliseconds
+        } else {
+          await bot.sendMessage(
+            chatId,
+            "❌ Thời gian không hợp lệ! Vui lòng nhập số từ 1-120 phút."
+          );
+        }
+        return;
+      }
+    }
+
     // Xử lý lệnh /start_reminders
     if (text === "/start_reminders") {
       reminderState.set(chatId, {
@@ -310,6 +454,8 @@ bot.on("message", async (msg) => {
         dailyCalories: 0,
         activityStart: null,
         currentActivity: null,
+        lunchWalkStatus: null,
+        lunchWalkStartTime: null,
       });
 
       // Thông báo xác nhận ngay lập tức
@@ -344,6 +490,8 @@ Tôi sẽ gửi thông báo cho bạn vào các mốc thời gian quan trọng v
         dailyCalories: 0,
         activityStart: null,
         currentActivity: null,
+        lunchWalkStatus: null,
+        lunchWalkStartTime: null,
       });
 
       // Thông báo xác nhận ngay lập tức
@@ -471,6 +619,111 @@ ${getDailyProgress(state.dailyCalories)}`;
       return;
     }
 
+    // Xử lý lệnh đi dạo
+    if (text === "/walk") {
+      await bot.sendMessage(
+        chatId,
+        `🚶‍♂️ Bạn muốn đi dạo bao lâu?
+
+Sử dụng lệnh: /walk [số] phút
+Ví dụ: /walk 15 (đi dạo 15 phút)
+Ví dụ: /walk 30 (đi dạo 30 phút)
+
+💡 Thời gian đi dạo được khuyến nghị: 15-30 phút`
+      );
+      return;
+    }
+
+    // Xử lý lệnh đi dạo với thời gian
+    if (text.startsWith("/walk ")) {
+      const walkMatch = text.match(/\/walk\s+(\d+)/);
+      if (walkMatch) {
+        const walkDuration = parseInt(walkMatch[1]);
+        if (walkDuration > 0 && walkDuration <= 120) {
+          // Tối đa 2 giờ
+          const state = reminderState.get(chatId);
+          if (state && state.enabled) {
+            if (state.lunchWalkStatus === "walking") {
+              await bot.sendMessage(
+                chatId,
+                "🚶‍♂️ Bạn đang trong quá trình đi dạo rồi! Hãy đợi tôi nhắc bạn hoàn thành."
+              );
+            } else if (state.lunchWalkStatus === "completed") {
+              await bot.sendMessage(
+                chatId,
+                "✅ Bạn đã hoàn thành đi dạo hôm nay rồi!"
+              );
+            } else {
+              // Bắt đầu đi dạo với thời gian chỉ định
+              state.lunchWalkStatus = "walking";
+              state.lunchWalkStartTime = new Date();
+              reminderState.set(chatId, state);
+
+              const estimatedCalories = calculateActivityCalories(
+                "light_exercise",
+                walkDuration
+              );
+
+              await bot.sendMessage(
+                chatId,
+                `🚶‍♂️ Bắt đầu đi dạo ${walkDuration} phút!
+              
+⏰ Thời gian: ${walkDuration} phút
+🔥 Dự kiến calo tiêu thụ: ${estimatedCalories} calo
+💡 Tôi sẽ nhắc bạn khi hoàn thành!`
+              );
+
+              // Lên lịch nhắc nhở sau thời gian chỉ định
+              setTimeout(async () => {
+                const walkState = reminderState.get(chatId);
+                if (walkState && walkState.lunchWalkStatus === "walking") {
+                  const caloriesBurned = calculateActivityCalories(
+                    "light_exercise",
+                    walkDuration
+                  );
+                  walkState.dailyCalories += caloriesBurned;
+                  walkState.lunchWalkStatus = "completed";
+                  reminderState.set(chatId, walkState);
+
+                  await bot.sendMessage(
+                    chatId,
+                    `✅ Hoàn thành đi dạo!
+                  
+⏰ Thời gian đi dạo: ${walkDuration} phút
+🔥 Calo tiêu thụ: ${caloriesBurned} calo
+⚡ Trung bình: ${Math.round(caloriesBurned / walkDuration)} calo/phút
+💡 Đi dạo giúp cải thiện tuần hoàn máu và đốt calo hiệu quả!`
+                  );
+
+                  // Gửi tổng calo trong ngày
+                  const dailyTotalMessage = `📈 Tổng calo tiêu thụ hôm nay: ${
+                    walkState.dailyCalories
+                  } calo\n\n${getDailyProgress(walkState.dailyCalories)}`;
+                  await bot.sendMessage(chatId, dailyTotalMessage);
+                }
+              }, walkDuration * 60 * 1000); // Chuyển phút thành milliseconds
+            }
+          } else {
+            await bot.sendMessage(
+              chatId,
+              "Vui lòng bật tính năng nhắc nhở trước bằng lệnh /start_reminders"
+            );
+          }
+        } else {
+          await bot.sendMessage(
+            chatId,
+            "❌ Thời gian không hợp lệ! Vui lòng nhập số từ 1-120 phút (ví dụ: /walk 15)"
+          );
+        }
+      } else {
+        await bot.sendMessage(
+          chatId,
+          "❌ Định dạng không đúng! Vui lòng sử dụng: /walk [số] (ví dụ: /walk 15)"
+        );
+      }
+      return;
+    }
+
     // Tin nhắn mặc định
     await bot.sendMessage(
       chatId,
@@ -482,6 +735,8 @@ ${getDailyProgress(state.dailyCalories)}`;
 /calories - Xem thống kê calo hôm nay
 /profile - Xem thông tin cơ thể
 /update - Cập nhật cân nặng
+/walk - Hướng dẫn đi dạo
+/walk [số] - Đi dạo với thời gian tùy chỉnh (ví dụ: /walk 15)
 
 🔥 Tôi sẽ giúp bạn theo dõi calo tiêu thụ cho từng hoạt động trong ngày!`
     );
