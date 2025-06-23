@@ -256,8 +256,18 @@ function checkReminders() {
             continue;
           }
 
-          // Lên lịch gửi báo cáo calo sau khi kết thúc hoạt động
+          // Nếu là light_exercise (giãn cơ/đi lại), chỉ tính calo nếu user đã gửi lệnh đi dạo
+          if (event.activity === "light_exercise") {
+            // Nếu là khung giờ light_exercise nhưng không phải interactive (tức là giải lao),
+            // chỉ cộng calo nếu user đã gửi lệnh walk trong khoảng thời gian này
+            // => Không tự động cộng calo, chỉ gửi nhắc nhở
+            continue;
+          }
+
+          // Lên lịch gửi báo cáo calo sau khi kết thúc hoạt động (trừ light_exercise)
           setTimeout(async () => {
+            // Nếu là light_exercise thì bỏ qua (đã xử lý ở lệnh walk)
+            if (event.activity === "light_exercise") return;
             const caloriesBurned = calculateActivityCalories(
               event.activity,
               event.duration
@@ -304,6 +314,31 @@ function getDailyProgress(dailyCalories) {
 
 // Bắt đầu kiểm tra nhắc nhở mỗi phút
 setInterval(checkReminders, 60000);
+
+// Reset dailyCalories về 0 cho tất cả user vào 00:00 mỗi ngày
+function resetDailyCalories() {
+  for (const [chatId, state] of reminderState.entries()) {
+    state.dailyCalories = 0;
+    reminderState.set(chatId, state);
+  }
+}
+
+// Thiết lập interval để reset vào đúng 00:00 mỗi ngày
+function scheduleDailyReset() {
+  const now = new Date();
+  const vnNow = new Date(
+    now.toLocaleString("en-US", { timeZone: "Asia/Ho_Chi_Minh" })
+  );
+  const nextMidnight = new Date(vnNow);
+  nextMidnight.setHours(24, 0, 0, 0);
+  const msToMidnight = nextMidnight - vnNow;
+  setTimeout(() => {
+    resetDailyCalories();
+    // Sau lần đầu, cứ 24h lại reset
+    setInterval(resetDailyCalories, 24 * 60 * 60 * 1000);
+  }, msToMidnight);
+}
+scheduleDailyReset();
 
 // Xử lý tin nhắn từ người dùng
 bot.on("message", async (msg) => {
